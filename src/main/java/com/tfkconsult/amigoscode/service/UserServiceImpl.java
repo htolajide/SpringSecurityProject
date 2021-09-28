@@ -3,14 +3,23 @@ package com.tfkconsult.amigoscode.service;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.io.IOException;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import javax.transaction.Transactional;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tfkconsult.amigoscode.domain.AppUser;
 import com.tfkconsult.amigoscode.domain.Role;
 import com.tfkconsult.amigoscode.repository.RoleRepository;
 import com.tfkconsult.amigoscode.repository.UserRepository;
+import com.tfkconsult.amigoscode.utility.TokenGenerator;
 
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -29,6 +38,7 @@ public class UserServiceImpl implements UserService, UserDetailsService {
     private final UserRepository userRepo; 
     private final RoleRepository roleRepo; 
     private final PasswordEncoder passwordEncoder;
+    private final TokenGenerator tokenGenerator;
 
     @Override 
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException{
@@ -75,5 +85,38 @@ public class UserServiceImpl implements UserService, UserDetailsService {
     @Override
     public List<AppUser> getUsers() {
         return userRepo.findAll();
+    }
+
+    @Override
+    public void refreshToken(HttpServletRequest request, HttpServletResponse response) throws IOException{
+        String authorizationHeader = request.getHeader("Authorization");
+        if (authorizationHeader != null && authorizationHeader.startsWith("Bearer ")) {
+            try {
+                String refresh_token = authorizationHeader.substring("Bearer ".length());
+                String username = tokenGenerator.getVerifiedUsername(refresh_token);
+                AppUser user = getUser(username);
+                String access_token = tokenGenerator.getRefreshAccessToken(request, response, user);
+                //response.setHeader("access_token", access_token);
+                //response.setHeader("refresh_token", refresh_token);
+                Map<String, String> tokens = new HashMap<>();
+                tokens.put("access_token", access_token);
+                tokens.put("refresh_token", refresh_token);
+                response.setContentType("application/json");
+                new ObjectMapper().writeValue(response.getOutputStream(), tokens);
+
+            } catch (Exception exception) {
+                log.error("Error logging in: {}", exception.getMessage());
+                response.setHeader("Error", exception.getMessage());
+                response.setStatus(HttpStatus.FORBIDDEN.value());
+                // response.sendError(HttpStatus.FORBIDDEN.value());
+                Map<String, String> error = new HashMap<>();
+                error.put("error_message", exception.getMessage());
+                response.setContentType("application/json");
+                new ObjectMapper().writeValue(response.getOutputStream(), error);
+            }
+        } else {
+            throw new RuntimeException("Refresh token is missing");
+        }
+
     }
 }
